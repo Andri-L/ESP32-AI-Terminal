@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 Audio Monitor</title>
+<style>
+  :root {
+    --bg:     #0b0f14;
+    --panel:  #141a22;
+    --border: #1e293b;
+    --text:   #94a3b8;
+    --green:  #22c55e;
+    --red:    #ef4444;
+    --blue:   #3b82f6;
+    --cyan:   #06b6d4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  .container {
+    max-width: 960px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  header h1 { font-size: 16px; font-weight: 500; color: #e2e8f0; }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--red);
+    transition: background .3s;
+  }
+  .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+  }
+  .stat .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+  .stat .value { font-size: 22px; font-weight: 600; color: #e2e8f0; }
+  .stat .unit { font-size: 12px; color: #64748b; }
+
+  .wave-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .wave-panel .title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #64748b;
+    margin-bottom: 8px;
+  }
+  .meter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .meter-label { font-size: 11px; color: #64748b; width: 60px; }
+  .meter-track {
+    flex: 1;
+    height: 20px;
+    background: #0a0e13;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .meter-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #22c55e 0%, #f59e0b 70%, #ef4444 100%);
+    transition: width 0.1s linear;
+  }
+  .meter-value {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    color: #e2e8f0;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 220px;
+    border-radius: 4px;
+    background: #0a0e13;
+  }
+  .debug-row {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #64748b;
+    font-family: monospace;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .input-group label {
+    font-size: 12px;
+    color: #64748b;
+  }
+  .input-group input {
+    width: 80px;
+    padding: 6px 8px;
+    background: #0a0e13;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: #e2e8f0;
+    font-family: inherit;
+    font-size: 13px;
+    text-align: center;
+  }
+  .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn-primary {
+    background: var(--green);
+    color: #0b0f14;
+  }
+  .btn-secondary {
+    background: var(--blue);
+    color: #fff;
+  }
+  audio {
+    width: 100%;
+    margin-top: 8px;
+    border-radius: 4px;
+    height: 36px;
+  }
+
+  .log-panel {
+    flex: 1;
+    min-height: 140px;
+    max-height: 240px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .log-panel .title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #64748b;
+    margin-bottom: 6px;
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+  }
+  .log-entry { padding: 1px 0; }
+  .log-entry .id   { color: var(--cyan); }
+  .log-entry .size { color: var(--blue); }
+  .log-entry .bw   { color: #f59e0b; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>ESP32 Audio Batch Monitor</h1>
+    <div class="status">
+      <span id="status-text">Disconnected</span>
+      <div class="dot" id="dot"></div>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="label">Batches</div>
+      <div class="value" id="stat-batches">0</div>
+    </div>
+    <div class="stat">
+      <div class="label">Total Data</div>
+      <div class="value" id="stat-bytes">0 <span class="unit">KB</span></div>
+    </div>
+    <div class="stat">
+      <div class="label">Data Rate</div>
+      <div class="value" id="stat-rate">0 <span class="unit">KB/s</span></div>
+    </div>
+    <div class="stat">
+      <div class="label">Elapsed</div>
+      <div class="value" id="stat-elapsed">0 <span class="unit">s</span></div>
+    </div>
+  </div>
+
+  <div class="wave-panel">
+    <div class="title">Audio Level & Waveform</div>
+
+    <!-- RMS Level Meter -->
+    <div class="meter-bar">
+      <div class="meter-label">RMS Level</div>
+      <div class="meter-track">
+        <div class="meter-fill" id="meter-fill"></div>
+        <div class="meter-value" id="meter-value">-inf dB</div>
+      </div>
+    </div>
+
+    <canvas id="wave-canvas" width="900" height="220"></canvas>
+
+    <div class="debug-row">
+      <span id="debug-samples">samples: waiting…</span>
+      <span id="debug-fps">frames: 0</span>
+    </div>
+
+    <!-- Playback controls -->
+    <div class="controls">
+      <div class="input-group">
+        <label>Merge last</label>
+        <input type="number" id="batch-count" value="1000" min="1" max="4000" step="100">
+        <label>batches</label>
+      </div>
+      <button id="btn-play" class="btn btn-primary">▶ Merge & Play</button>
+      <button id="btn-dl" class="btn btn-secondary">⬇ Download WAV</button>
+    </div>
+    <audio id="audio-player" controls></audio>
+  </div>
+
+  <div class="log-panel" id="log-panel">
+    <div class="title">Event Log</div>
+    <div id="log-entries"></div>
+  </div>
+
+</div>
+
+<script>
+  // ================================================================
+  //  State & DOM refs
+  // ================================================================
+  let reconnectTimer = null;
+  let startTime       = null;
+  let totalBytes      = 0;
+  let frameCount      = 0;
+
+  const LOG_EL   = document.getElementById('log-entries');
+  const canvas   = document.getElementById('wave-canvas');
+  const ctx      = canvas.getContext('2d');
+  const W        = canvas.width;   // fixed 900
+  const H        = canvas.height;  // fixed 220
+
+  // Rolling history: keep last 150 batches for the waterfall display
+  const HISTORY_LEN = 150;
+  const history     = [];   // each entry = { rms, peak }
+
+  // ================================================================
+  //  Helpers
+  // ================================================================
+  function $(id) { return document.getElementById(id); }
+
+  function setStatus(live, text) {
+    $('status-text').textContent = text;
+    $('dot').className = 'dot' + (live ? ' live' : '');
+  }
+
+  function fmtKB(bytes) { return (bytes / 1024).toFixed(1); }
+
+  function log(id, size) {
+    const now  = new Date().toLocaleTimeString();
+    const kb   = (size / 1024).toFixed(2);
+    const rate = startTime ? (totalBytes / ((Date.now() - startTime) / 1000) / 1024).toFixed(1) : '--';
+    const div  = document.createElement('div');
+    div.className = 'log-entry';
+    div.innerHTML = `<span style="color:#475569">${now}</span>  `
+                  + `<span class="id">#${id}</span>  `
+                  + `<span class="size">${kb} KB</span>  `
+                  + `<span class="bw">${rate} KB/s</span>`;
+    LOG_EL.prepend(div);
+    while (LOG_EL.children.length > 100) LOG_EL.lastChild.remove();
+  }
+
+  function updateStats(batchCount, bytes, elapsedMs) {
+    totalBytes = bytes;
+    const elapsedS = elapsedMs / 1000;
+    const rate     = elapsedS > 0 ? (bytes / elapsedS / 1024).toFixed(1) : 0;
+    $('stat-batches').textContent  = batchCount;
+    $('stat-bytes').innerHTML      = fmtKB(bytes) + ' <span class="unit">KB</span>';
+    $('stat-rate').innerHTML       = rate + ' <span class="unit">KB/s</span>';
+    $('stat-elapsed').innerHTML    = elapsedS.toFixed(0) + ' <span class="unit">s</span>';
+  }
+
+  // ================================================================
+  //  RMS / Peak calculation from 512 int16 samples
+  // ================================================================
+  function analyse(samples) {
+    let sumSq = 0;
+    let peak  = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const v = samples[i];
+      sumSq += v * v;
+      const a = Math.abs(v);
+      if (a > peak) peak = a;
+    }
+    const rms = Math.sqrt(sumSq / samples.length);
+    return { rms, peak };
+  }
+
+  function dbFromLinear(lin) {
+    if (lin <= 0) return -Infinity;
+    return 20 * Math.log10(lin / 32768);
+  }
+
+  // ================================================================
+  //  Drawing — fixed 900 x 220 canvas, no HiDPI scaling
+  // ================================================================
+  function draw() {
+    frameCount++;
+    $('debug-fps').textContent = `frames: ${frameCount}`;
+
+    // Clear
+    ctx.fillStyle = '#0a0e13';
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = '#151d28';
+    ctx.lineWidth = 0.5;
+    for (let y = 0; y <= H; y += H / 8) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    for (let x = 0; x <= W; x += W / 12) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+
+    // Zero line
+    const midY = H / 2;
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(W, midY); ctx.stroke();
+
+    if (history.length < 2) return;
+
+    // ---- Waterfall / scrolling history ----
+    // Each history entry becomes one vertical column on the canvas.
+    // The newest batch is on the right edge.
+    const cols = Math.min(history.length, W);
+    const startIdx = history.length - cols;
+
+    for (let col = 0; col < cols; col++) {
+      const entry = history[startIdx + col];
+      const x = col;
+
+      // Draw a vertical line whose height represents the peak amplitude
+      // normalized so the current global maximum fills the canvas.
+      // This auto-gains the display so even whisper-quiet audio is visible.
+      const hPix = Math.min((entry.peak / maxPeakEver) * (H / 2), H / 2 - 2);
+      if (hPix > 0.5) {
+        ctx.strokeStyle = `rgba(16, 185, 129, ${0.3 + 0.7 * (entry.peak / maxPeakEver)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, midY - hPix);
+        ctx.lineTo(x, midY + hPix);
+        ctx.stroke();
+      }
+    }
+
+    // ---- Current batch waveform (rightmost 300 px) ----
+    if (currentBatch && currentBatch.length > 1) {
+      const wfW = 300;
+      const wfX = W - wfW;
+      const step = wfW / (currentBatch.length - 1);
+
+      // Auto-gain for the current batch: scale so the peak touches midY-4
+      const batchPeak = currentPeak > 0 ? currentPeak : 1;
+      const yScale = (H / 2 - 4) / batchPeak;
+
+      // Fill
+      ctx.beginPath();
+      ctx.moveTo(wfX, midY);
+      for (let i = 0; i < currentBatch.length; i++) {
+        ctx.lineTo(wfX + i * step, midY - currentBatch[i] * yScale);
+      }
+      ctx.lineTo(W, midY);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
+      ctx.fill();
+
+      // Stroke
+      ctx.beginPath();
+      for (let i = 0; i < currentBatch.length; i++) {
+        if (i === 0) ctx.moveTo(wfX + i * step, midY - currentBatch[i] * yScale);
+        else ctx.lineTo(wfX + i * step, midY - currentBatch[i] * yScale);
+      }
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // ================================================================
+  //  Globals for drawing
+  // ================================================================
+  let currentBatch = null;
+  let currentPeak  = 0;
+  let maxPeakEver  = 1;   // grows over time; prevents jumps
+
+  function pushBatch(samples) {
+    const { rms, peak } = analyse(samples);
+    history.push({ rms, peak });
+    if (history.length > HISTORY_LEN) history.shift();
+
+    currentBatch = samples;
+    currentPeak  = peak;
+
+    // Smoothly grow maxPeakEver so the waterfall doesn't flicker
+    if (peak > maxPeakEver) maxPeakEver = peak;
+    else maxPeakEver = maxPeakEver * 0.995 + peak * 0.005;
+    if (maxPeakEver < 10) maxPeakEver = 10;   // floor so tiny signals still show
+
+    // Update level meter
+    const db = dbFromLinear(rms);
+    const pct = Math.min(Math.max((db + 60) / 60 * 100, 0), 100);
+    $('meter-fill').style.width = pct + '%';
+    $('meter-value').textContent = (db === -Infinity ? '-inf' : db.toFixed(1)) + ' dB';
+
+    // Update debug text
+    $('debug-samples').textContent =
+      `peak=${peak}  rms=${rms.toFixed(1)}  ` +
+      `first=[${samples.slice(0,5).join(',')}]  ` +
+      `maxPeakEver=${Math.round(maxPeakEver)}`;
+
+    draw();
+  }
+
+  // ================================================================
+  //  WebSocket
+  // ================================================================
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws    = new WebSocket(`${proto}://${location.host}/monitor`);
+
+    ws.onopen = () => {
+      setStatus(true, 'Connected');
+      console.log('[monitor] Connected');
+    };
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'batch') {
+        if (msg.batchId === 1) startTime = Date.now() - msg.elapsedMs;
+
+        updateStats(msg.batchId, msg.totalBytes, msg.elapsedMs);
+        log(msg.batchId, msg.batchSize);
+
+        if (msg.preview && msg.preview.length > 0) {
+          pushBatch(msg.preview);
+        }
+
+        setStatus(true, 'Streaming');
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => setStatus(false, 'Idle'), 3000);
+
+      } else if (msg.type === 'stats') {
+        if (msg.batchCount > 0 && !startTime) {
+          startTime = Date.now() - msg.elapsedMs;
+        }
+        updateStats(msg.batchCount, msg.totalBytes, msg.elapsedMs || 0);
+        setStatus(msg.batchCount > 0, msg.batchCount > 0 ? 'Streaming' : 'Idle');
+      }
+    };
+
+    ws.onclose = () => {
+      setStatus(false, 'Reconnecting…');
+      setTimeout(connect, 2000);
+    };
+
+    ws.onerror = () => { ws.close(); };
+  }
+
+  // ================================================================
+  //  Playback controls
+  // ================================================================
+  $('btn-play').addEventListener('click', () => {
+    const count = parseInt($('batch-count').value) || 1000;
+    const audio = $('audio-player');
+    audio.src = `/wav?count=${count}`;
+    audio.play().catch(err => console.error('Playback failed:', err));
+  });
+
+  $('btn-dl').addEventListener('click', () => {
+    const count = parseInt($('batch-count').value) || 1000;
+    const a = document.createElement('a');
+    a.href = `/wav?count=${count}&download=1`;
+    a.download = `recording_${count}batches.wav`;
+    a.click();
+  });
+
+  // ================================================================
+  //  Boot
+  // ================================================================
+  draw();
+  connect();
+</script>
+</body>
+</html>

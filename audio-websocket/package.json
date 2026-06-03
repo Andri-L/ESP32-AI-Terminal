@@ -1,0 +1,12 @@
+{
+  "name": "audio-websocket",
+  "version": "1.0.0",
+  "description": "WebSocket server for ESP32 Audio Batch Processor — receives raw PCM and serves a monitor dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8"
+  }
+}
