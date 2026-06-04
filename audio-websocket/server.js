@@ -12,6 +12,11 @@ const path       = require('path');
 const { WebSocketServer } = require('ws');
 
 const PORT       = 8080;
+const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
+if (!AUTH_TOKEN) {
+    console.error('FATAL: AUTH_TOKEN environment variable is not set');
+    process.exit(1);
+}
 const MIME_TYPES = {
     '.html': 'text/html',
     '.css':  'text/css',
@@ -160,6 +165,14 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
+    // Reject connections with a bad or missing auth token
+    const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (auth !== AUTH_TOKEN) {
+        console.log(`[ws] Rejecting ${req.socket.remoteAddress} — invalid token`);
+        ws.close(4401, 'Unauthorized');
+        return;
+    }
+
     // Tag the connection with its path — ws v8+ does not auto‑set ws.url
     const url = req.url || '/';
     ws._path = url;

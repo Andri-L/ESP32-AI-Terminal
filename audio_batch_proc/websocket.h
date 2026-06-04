@@ -9,7 +9,7 @@
 #define WS_CONNECTED_BIT  (1 << 2)
 
 // ---- Public API ----
-void wsInit(const char *url, EventGroupHandle_t evGroup);
+void wsInit(const char *url, const char *token, EventGroupHandle_t evGroup);
 void wsDeinit();
 
 #endif

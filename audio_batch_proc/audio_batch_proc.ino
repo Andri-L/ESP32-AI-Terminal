@@ -39,6 +39,9 @@
 // The server must accept raw binary WebSocket frames on this path.
 #define WS_SERVER_URL "ws://192.168.1.7:8080/audio"
 
+// ---- Auth token (must match the server's AUTH_TOKEN env var) ----
+#define AUTH_TOKEN "1K6IYgFlAew3G0MvRQ4izTD78kX5tmxa"
+
 // ================================================================
 //  FreeRTOS Event Group bits
 // ================================================================
@@ -166,7 +169,7 @@ void loop()
         // ----- Bring up WebSocket client & wait for handshake -----
         case STATE_WS_CONNECTING: {
             // Start the WebSocket client (creates wsSendTask internally)
-            wsInit(WS_SERVER_URL, sysEventGroup);
+            wsInit(WS_SERVER_URL, AUTH_TOKEN, sysEventGroup);
 
             // Wait up to 15 s for the WebSocket handshake to complete
             bits = xEventGroupWaitBits(sysEventGroup,

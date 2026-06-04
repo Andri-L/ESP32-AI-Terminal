@@ -23,6 +23,9 @@ static char  wsHost[64] = {0};
 static uint16_t wsPort  = 80;
 static char  wsPath[128] = {0};
 
+// Auth token (passed from main sketch)
+static char  wsToken[96] = {0};
+
 // ================================================================
 //  URL parser  —  extracts host, port, path from a ws:// URI
 // ================================================================
@@ -114,7 +117,7 @@ static bool wsHandshake()
     char key[25];
     base64Encode16(rnd, key);
 
-    // Build the HTTP Upgrade request
+    // Build the HTTP Upgrade request (include Authorization if a token is set)
     wsTcp.printf(
         "GET %s HTTP/1.1\r\n"
         "Host: %s:%u\r\n"
@@ -122,8 +125,9 @@ static bool wsHandshake()
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Key: %s\r\n"
         "Sec-WebSocket-Version: 13\r\n"
+        "Authorization: Bearer %s\r\n"
         "\r\n",
-        wsPath, wsHost, wsPort, key
+        wsPath, wsHost, wsPort, key, wsToken
     );
     wsTcp.flush();
 
@@ -270,9 +274,17 @@ static void wsSendTask(void *parameter)
 // ================================================================
 //  wsInit  —  connect TCP, perform handshake, spawn sender task
 // ================================================================
-void wsInit(const char *url, EventGroupHandle_t evGroup)
+void wsInit(const char *url, const char *token, EventGroupHandle_t evGroup)
 {
     wsEventGrp = evGroup;
+
+    // Store auth token for handshake and reconnects
+    if (token) {
+        strncpy(wsToken, token, sizeof(wsToken) - 1);
+        wsToken[sizeof(wsToken) - 1] = '\0';
+    } else {
+        wsToken[0] = '\0';
+    }
 
     // Parse the ws:// URL
     parseUrl(url, wsHost, sizeof(wsHost), &wsPort, wsPath, sizeof(wsPath));
