@@ -17,6 +17,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -31,13 +32,17 @@
 // ================================================================
 
 // ---- WiFi credentials (hardcoded — WPA2‑PSK) ----
-#define WIFI_SSID     "LINA SOFI"
+#define WIFI_SSID     "LINA SOFI 5G"
 #define WIFI_PASSWORD "Lina0429"
 
 // ---- Remote WebSocket server ----
 // Must be a ws:// URI (wss:// for TLS, but plain ws:// is used here).
 // The server must accept raw binary WebSocket frames on this path.
-#define WS_SERVER_URL "ws://192.168.1.7:8080/audio"
+// (mDNS discovery will fill this automatically; used as fallback if mDNS fails)
+#define WS_SERVER_HOST   "audio-webserver.local"
+#define WS_SERVER_PORT   8080
+#define WS_SERVER_PATH   "/audio"
+#define WS_FALLBACK_URL  "ws://192.168.80.15:8080/audio"
 
 // ---- Auth token (must match the server's AUTH_TOKEN env var) ----
 #define AUTH_TOKEN "1K6IYgFlAew3G0MvRQ4izTD78kX5tmxa"
@@ -65,6 +70,7 @@ typedef enum {
 // ================================================================
 static EventGroupHandle_t sysEventGroup = NULL;
 static sys_state_t        state         = STATE_IDLE;
+static char               wsServerUrl[128] = {0};  // Resolved via mDNS
 
 // ================================================================
 //  WiFi event handler (updates the FreeRTOS event group)
@@ -154,12 +160,35 @@ void loop()
         // ----- Wait for WiFi association -----
         case STATE_WIFI_CONNECTING: {
             bits = xEventGroupWaitBits(sysEventGroup,
-                                       WIFI_CONNECTED_BIT,
-                                       pdFALSE,           // Don't clear
-                                       pdTRUE,            // Wait for all
-                                       pdMS_TO_TICKS(500));
+                                        WIFI_CONNECTED_BIT,
+                                        pdFALSE,           // Don't clear
+                                        pdTRUE,            // Wait for all
+                                        pdMS_TO_TICKS(500));
 
             if (bits & WIFI_CONNECTED_BIT) {
+                // Start mDNS client on the ESP32
+                if (MDNS.begin("esp32-client")) {
+                    Serial.println("[mDNS] Started as esp32-client");
+                } else {
+                    Serial.println("[mDNS] Failed to start responder");
+                }
+
+                // Resolve the server's mDNS name
+                IPAddress serverIp = MDNS.queryHost(WS_SERVER_HOST, 2000);
+                if (serverIp) {
+                    snprintf(wsServerUrl, sizeof(wsServerUrl),
+                             "ws://%s:%u%s",
+                             serverIp.toString().c_str(),
+                             WS_SERVER_PORT, WS_SERVER_PATH);
+                    Serial.printf("[mDNS] Resolved %s → %s\n",
+                                  WS_SERVER_HOST, wsServerUrl);
+                } else {
+                    strncpy(wsServerUrl, WS_FALLBACK_URL, sizeof(wsServerUrl) - 1);
+                    wsServerUrl[sizeof(wsServerUrl) - 1] = '\0';
+                    Serial.printf("[mDNS] Resolution failed — using fallback %s\n",
+                                  wsServerUrl);
+                }
+
                 state = STATE_WS_CONNECTING;
                 Serial.println("[State] WiFi up → connecting WebSocket");
             }
@@ -169,7 +198,7 @@ void loop()
         // ----- Bring up WebSocket client & wait for handshake -----
         case STATE_WS_CONNECTING: {
             // Start the WebSocket client (creates wsSendTask internally)
-            wsInit(WS_SERVER_URL, AUTH_TOKEN, sysEventGroup);
+            wsInit(wsServerUrl, AUTH_TOKEN, sysEventGroup);
 
             // Wait up to 15 s for the WebSocket handshake to complete
             bits = xEventGroupWaitBits(sysEventGroup,

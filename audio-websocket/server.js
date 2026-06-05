@@ -9,9 +9,43 @@
 const http       = require('http');
 const fs         = require('fs');
 const path       = require('path');
+const os         = require('os');
 const { WebSocketServer } = require('ws');
+const mdns       = require('multicast-dns')();
 
 const PORT       = 8080;
+
+// ================================================================
+//  mDNS helper — pick the best local IPv4 address to advertise
+//  (skip virtual/loopback, prefer Ethernet over Wi-Fi)
+// ================================================================
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    const candidates = [];
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                const addr = iface.address;
+                // Skip well-known virtual/VM IP ranges
+                if (addr.startsWith('127.')) continue;           // loopback
+                if (addr.startsWith('192.168.56.')) continue;      // VirtualBox host-only
+                if (addr.startsWith('192.168.99.')) continue;      // Vagrant / VirtualBox
+                if (addr.startsWith('172.29.')) continue;          // WSL / Hyper-V
+                if (addr.startsWith('172.17.')) continue;          // Docker default
+                if (addr.startsWith('10.0.75.')) continue;         // Docker for Windows
+                if (addr.startsWith('169.254.')) continue;         // Link-local / APIPA
+                candidates.push({ name, address: addr });
+            }
+        }
+    }
+    // Prefer Wi-Fi first (since user is on Wi-Fi now), then Ethernet, then anything else
+    const wifi = candidates.find(c => c.name.includes('Wi-Fi') || c.name.includes('Wireless'));
+    if (wifi) return wifi.address;
+    const eth = candidates.find(c => c.name.includes('Ethernet'));
+    if (eth) return eth.address;
+    return candidates[0] ? candidates[0].address : '0.0.0.0';
+}
+const LOCAL_IP = getLocalIP();
 const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 if (!AUTH_TOKEN) {
     console.error('FATAL: AUTH_TOKEN environment variable is not set');
@@ -165,19 +199,18 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
-    // Reject connections with a bad or missing auth token
-    const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (auth !== AUTH_TOKEN) {
-        console.log(`[ws] Rejecting ${req.socket.remoteAddress} — invalid token`);
-        ws.close(4401, 'Unauthorized');
-        return;
-    }
-
     // Tag the connection with its path — ws v8+ does not auto‑set ws.url
     const url = req.url || '/';
     ws._path = url;
 
     if (ws._path === '/audio') {
+        // Reject ESP32 connections with a bad or missing auth token
+        const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+        if (auth !== AUTH_TOKEN) {
+            console.log(`[ws] Rejecting ${req.socket.remoteAddress} — invalid token`);
+            ws.close(4401, 'Unauthorized');
+            return;
+        }
         // ---------- ESP32 audio upload path ----------
         console.log(`[audio] ESP32 connected from ${req.socket.remoteAddress}`);
 
@@ -264,4 +297,26 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`    ESP32    → ws://<your-ip>:${PORT}/audio`);
     console.log(`    Monitor  → ws://<your-ip>:${PORT}/monitor`);
     console.log(`    WAV      → http://<your-ip>:${PORT}/wav?count=1000\n`);
+
+    // Start mDNS advertisement
+    console.log(`  mDNS advertising as: audio-webserver.local (${LOCAL_IP})\n`);
+});
+
+// ================================================================
+//  mDNS responder — answer queries for audio-webserver.local
+// ================================================================
+mdns.on('query', (query) => {
+    const shouldRespond = query.questions.some(
+        q => q.name === 'audio-webserver.local' && q.type === 'A'
+    );
+    if (shouldRespond) {
+        mdns.respond({
+            answers: [{
+                name: 'audio-webserver.local',
+                type: 'A',
+                ttl: 300,
+                data: LOCAL_IP,
+            }],
+        });
+    }
 });
