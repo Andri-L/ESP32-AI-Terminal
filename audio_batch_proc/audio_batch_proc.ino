@@ -42,7 +42,7 @@
 #define WS_SERVER_HOST   "audio-webserver.local"
 #define WS_SERVER_PORT   8080
 #define WS_SERVER_PATH   "/audio"
-#define WS_FALLBACK_URL  "ws://192.168.80.15:8080/audio"
+#define WS_FALLBACK_URL  "ws://149.130.179.83:8080/audio"
 
 // ---- Auth token (must match the server's AUTH_TOKEN env var) ----
 #define AUTH_TOKEN "1K6IYgFlAew3G0MvRQ4izTD78kX5tmxa"
