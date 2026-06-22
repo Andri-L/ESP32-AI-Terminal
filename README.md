@@ -38,25 +38,31 @@ El sistema se divide en dos capas independientes que se comunican por red:
 │  WiFi: 2.4 GHz                                                    │
 │  Protocolo: I2S (audio digital)                                  │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+                               │
+                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     SERVIDOR (Node.js)                        │
+│                  SERVIDOR (Node.js — Debug)                   │
 │  • WebSocket: recepción de audio en tiempo real               │
 │  • Rolling buffer: últimos 4000 batches (~8 MB)               │
 │  • WAV builder: descarga de grabaciones                       │
 │  • Monitor web: dashboard en tiempo real                      │
 │  • mDNS: autodescubrimiento (`audio-webserver.local`)         │
 │  • Auth: token Bearer para seguridad del stream ESP32         │
+│                                                              │
+│  ⚠️ Solo para desarrollo y monitoreo. En producción,         │
+│     el ESP32 envía audio directamente a GoAgent.              │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
+                               │
+                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     AGENTE IA (Golang)                        │
-│  • LangGraph: procesamiento de conversación                   │
-│  • STT: Speech-to-Text (Whisper / Deepgram / Google)          │
-│  • TTS: Text-to-Speech (OpenAI / ElevenLabs / Google)         │
-│  • Endpoints: /voice, /transcribe, /speak, /health           │
+│                     GoAgent (Golang)                          │
+│  • WebSocket /audio: ingestión de audio PCM del ESP32        │
+│  • VAD: Voice Activity Detection (RMS → dBFS)                │
+│  • ASR: Hugging Face Whisper (speech-to-text)                │
+│  • LLM: Groq / OpenAI-compatible (ReAct loop + tools)        │
+│  • Session memory: conversación multi-turno                  │
+│                                                              │
+│  ✅ Operacional — desplegado en OCI Free VPS                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -67,11 +73,11 @@ El sistema se divide en dos capas independientes que se comunican por red:
 | 1 | INMP441 | Captura audio analógico del usuario |
 | 2 | ESP32-WROVER-E | Recibe señal I2S y la procesa en buffer PSRAM |
 | 3 | ESP32 → WiFi | Envía audio PCM al servidor vía WebSocket |
-| 4 | Servidor (Node.js) | Acumula audio en buffer circular, sirve monitor |
-| 5 | Agente (Golang) | Convierte audio a texto (STT), procesa con LangGraph |
-| 6 | Agente → TTS | Genera respuesta de audio |
-| 7 | ESP32 → MAX98357A | Recibe audio de respuesta y lo reproduce vía I2S |
-| 8 | Altavoz 4Ω 3W | Reproduce la respuesta en voz al usuario |
+| 4 | GoAgent `/audio` | Recibe batches PCM binarios (2048 bytes cada ~64ms) |
+| 5 | GoAgent VAD | Detecta inicio/fin de habla (RMS → dBFS) |
+| 6 | GoAgent ASR | Construye WAV en memoria → Hugging Face Whisper → texto |
+| 7 | GoAgent LLM | Procesa texto con ReAct loop vía Groq API |
+| 8 | GoAgent | Loggea la respuesta textual (TTS planificado para futuro) |
 
 > ⚠️ **Nota:** El dispositivo requiere conexión WiFi activa. No procesa IA localmente; el ESP32 actúa como interfaz de audio y red.
 
@@ -137,7 +143,9 @@ ESP32-AI-Terminal/
 
 ## Cómo ejecutar
 
-### 1. Servidor Node.js
+### 1. Servidor Node.js (solo desarrollo/monitoreo)
+
+El servidor Node.js es para debugging y monitoreo local. **En producción**, el ESP32 envía audio directamente al WebSocket de GoAgent en el VPS.
 
 ```powershell
 # Desde el directorio audio-websocket/
@@ -175,9 +183,10 @@ mDNS advertising as: audio-webserver.local (192.168.80.15)
 
 El ESP32 intentará:
 1. Conectarse a WiFi
-2. Resolver `audio-webserver.local` vía mDNS
-3. Conectarse al WebSocket con token de autenticación
-4. Iniciar streaming de audio
+2. Resolver `audio-webserver.local` vía mDNS (entorno local)
+3. Si mDNS falla, usar `WS_FALLBACK_URL` → `ws://149.130.179.83:8080/audio` (GoAgent en VPS)
+4. Conectarse al WebSocket con token de autenticación
+5. Iniciar streaming de audio
 
 ---
 
@@ -203,10 +212,11 @@ El ESP32 intentará:
 
 | Prioridad | Decisión | Opciones | Impacto |
 |---|---|---|---|
-| 🔴 Alta | Servicio STT | Whisper API / Deepgram / Google | Endpoint /voice y /transcribe |
-| 🔴 Alta | Servicio TTS | OpenAI TTS / ElevenLabs / Google | Calidad de voz |
+| ✅ Decidido | Servicio STT | **Hugging Face Whisper** (`whisper-large-v3-turbo`) | Integrado en GoAgent |
+| ✅ Decidido | LLM | **Groq API** (OpenAI-compatible, `llama-3.3-70b-versatile`) | Integrado en GoAgent |
+| 🔴 Alta | Servicio TTS | Piper (local) / OpenAI TTS / ElevenLabs | Calidad de voz |
 | 🟡 Media | Formato de audio | WAV / PCM raw / Opus | Uso de red y memoria |
-| 🟡 Media | Detección de voz | Botón físico / VAD / Wake word | Experiencia de uso |
+| 🟡 Media | Detección de voz | Botón físico / VAD / Wake word | VAD implementado en GoAgent |
 | 🟢 Baja | Frecuencia de muestreo | 16000 Hz / 44100 Hz | Tamaño de buffer |
 
 ---
@@ -220,9 +230,10 @@ El ESP32 intentará:
 - ✅ Descarga de audio como WAV
 - ✅ mDNS autodescubrimiento (`audio-webserver.local`)
 - ✅ Autenticación Bearer token en WebSocket
-- 🔄 **Pendiente:** Integración con Agente IA (Golang + LangGraph)
-- 🔄 **Pendiente:** Implementar STT + TTS
-- 🔄 **Pendiente:** Reproducción de audio (I2S out → MAX98357A)
+- ✅ **Integración con GoAgent** — WebSocket directo ESP32 → GoAgent
+- ✅ **VAD + ASR** — Detección de voz y transcripción con Whisper
+- ✅ **LLM con herramientas** — ReAct loop vía Groq API
+- 🔄 **Pendiente:** TTS + reproducción de audio (I2S out → MAX98357A)
 
 ---
 
