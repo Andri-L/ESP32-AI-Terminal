@@ -14,12 +14,12 @@
 // ---- FreeRTOS queue sizing ----
 #define PCM_QUEUE_LENGTH 4     // Number of PCM blocks the queue can hold
 
-// ---- I2S pins for INMP441 microphone ----
-// GPIO  25 (WS) & GPIO  26 (SCK) shared with MAX98357A speaker
-// GPIO  34 is input‑only -> perfect for mic data
+// ---- I2S pins ----
+// GPIO 25 (WS) & GPIO 26 (SCK) shared between INMP441 mic and MAX98357A speaker
 #define I2S_WS_PIN  25
 #define I2S_SCK_PIN 26
 #define I2S_SD_PIN  34
+#define I2S_AMP_DOUT_PIN 22
 
 // ---- PCM block passed through FreeRTOS queue ----
 typedef struct {

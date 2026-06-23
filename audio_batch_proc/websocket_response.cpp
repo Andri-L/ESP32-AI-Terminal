@@ -232,7 +232,7 @@ static void wsReceiveTask(void *parameter)
 
     while (respRunning) {
         if (!respTcp.connected()) {
-            Serial.println("[WS/resp] Reconnecting…");
+            Serial.println("[WS/resp] Connecting…");
             if (respTcp.connect(respHost, respPort)) {
                 if (wsResponseHandshake()) {
                     Serial.println("[WS/resp] Connected");
@@ -257,8 +257,10 @@ static void wsReceiveTask(void *parameter)
                 if (xQueueSend(playQueue, &block, pdMS_TO_TICKS(10)) != pdTRUE) {
                     free(data);
                 }
+            } else {
+                // No frame yet — yield to prevent busy-waiting
+                vTaskDelay(pdMS_TO_TICKS(5));
             }
-            // len==0 → no frame yet or control frame handled, just continue
         } else {
             Serial.println("[WS/resp] Connection closed by server");
             respTcp.stop();

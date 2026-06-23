@@ -32,7 +32,7 @@ void micInit() {
 
     // ---------- Configure I2S peripheral ----------
     i2s_config_t i2s_config = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_TX),
         .sample_rate          = SAMPLE_RATE,
         .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
@@ -41,7 +41,7 @@ void micInit() {
         .dma_buf_count        = DMA_BUF_COUNT,
         .dma_buf_len          = DMA_BUF_LEN,
         .use_apll             = false,
-        .tx_desc_auto_clear   = false,
+        .tx_desc_auto_clear   = true,
         .fixed_mclk           = 0
     };
 
@@ -54,7 +54,7 @@ void micInit() {
     i2s_pin_config_t pin_config = {
         .bck_io_num   = I2S_SCK_PIN,
         .ws_io_num    = I2S_WS_PIN,
-        .data_out_num = I2S_PIN_NO_CHANGE,   // Not using TX
+        .data_out_num = I2S_AMP_DOUT_PIN,    // MAX98357A DIN
         .data_in_num  = I2S_SD_PIN            // INMP441 SD pin (GPIO 34 input‑only)
     };
 
