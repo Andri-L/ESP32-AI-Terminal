@@ -1,5 +1,7 @@
 #include "audio_mic.h"
+#include "audio_spk.h"
 #include <driver/i2s.h>
+#include <esp_heap_caps.h>
 
 // ---- Global queue (definition) ----
 // Initialised in micInit(), shared between audioTask (producer)
@@ -109,9 +111,12 @@ void audioTask(void *parameter) {
     Serial.printf("[MIC] Audio task running on Core %d\n", xPortGetCoreID());
 
     while (1) {
-        // Allocate a fresh buffer if we don't own one yet
+        // Allocate a fresh buffer if we don't own one yet (prefer PSRAM)
         if (currentBuffer == NULL) {
-            currentBuffer = (int16_t *)malloc(bytesPerBlock);
+            currentBuffer = (int16_t *)heap_caps_malloc(bytesPerBlock, MALLOC_CAP_SPIRAM);
+            if (currentBuffer == NULL) {
+                currentBuffer = (int16_t *)malloc(bytesPerBlock);
+            }
             if (currentBuffer == NULL) {
                 Serial.println("[MIC] Buffer alloc failed — retrying");
                 vTaskDelay(pdMS_TO_TICKS(50));
@@ -129,6 +134,12 @@ void audioTask(void *parameter) {
                                   portMAX_DELAY);
 
         if (err == ESP_OK && bytesRead > 0) {
+            // Mute microphone while speaker is playing (prevents echo/feedback loop)
+            if (g_isSpeaking) {
+                // Drop the buffer — reuse it next iteration
+                continue;
+            }
+
             block.data   = (uint8_t *)currentBuffer;
             block.length = bytesRead;
 

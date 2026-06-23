@@ -6,9 +6,10 @@
 #include <freertos/queue.h>
 
 // ---- FreeRTOS queue for playback blocks ----
-#define PLAY_QUEUE_LENGTH 16
+#define PLAY_QUEUE_LENGTH 8
 
 extern QueueHandle_t playQueue;
+extern volatile bool g_isSpeaking;
 
 // ---- Public API ----
 void audioPlayTask(void *parameter);

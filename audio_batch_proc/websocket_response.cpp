@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <esp_heap_caps.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -201,8 +202,15 @@ static bool wsReadFrame(uint8_t **outData, size_t *outLen)
         return true;
     }
 
-    uint8_t *data = (uint8_t *)malloc(payloadLen);
-    if (!data) return false;
+    // Try PSRAM first, fall back to internal RAM
+    uint8_t *data = (uint8_t *)heap_caps_malloc(payloadLen, MALLOC_CAP_SPIRAM);
+    if (!data) {
+        data = (uint8_t *)malloc(payloadLen);
+    }
+    if (!data) {
+        Serial.printf("[WS/resp] Failed to alloc %llu bytes\n", payloadLen);
+        return false;
+    }
 
     size_t read = 0;
     while (read < payloadLen) {
