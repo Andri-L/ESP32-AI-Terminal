@@ -1,5 +1,6 @@
 #include "websocket_response.h"
 #include "audio_spk.h"
+#include "audio_mic.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
