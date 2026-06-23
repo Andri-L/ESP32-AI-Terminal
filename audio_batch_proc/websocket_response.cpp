@@ -137,9 +137,22 @@ static bool wsResponseHandshake()
 
 // ================================================================
 //  Read a WebSocket frame (server → client, NOT masked)
+//
+//  Returns:
+//    true, len>0  → got a binary data frame, *outData holds payload
+//    true, len=0  → no frame available yet, or handled a control frame
+//    false        → connection error / close frame
 // ================================================================
 static bool wsReadFrame(uint8_t **outData, size_t *outLen)
 {
+    *outData = NULL;
+    *outLen = 0;
+
+    // Wait for at least 2 header bytes
+    if (respTcp.available() < 2) {
+        return true; // No frame yet — not an error
+    }
+
     uint8_t hdr[2];
     if (respTcp.read(hdr, 2) != 2) return false;
 
@@ -147,19 +160,44 @@ static bool wsReadFrame(uint8_t **outData, size_t *outLen)
     uint64_t payloadLen = hdr[1] & 0x7F;
 
     if (payloadLen == 126) {
+        while (respTcp.available() < 2) { vTaskDelay(pdMS_TO_TICKS(1)); }
         uint8_t ext[2];
         if (respTcp.read(ext, 2) != 2) return false;
         payloadLen = (ext[0] << 8) | ext[1];
     } else if (payloadLen == 127) {
+        while (respTcp.available() < 8) { vTaskDelay(pdMS_TO_TICKS(1)); }
         uint8_t ext[8];
         if (respTcp.read(ext, 8) != 8) return false;
         payloadLen = 0;
         for (int i = 0; i < 8; i++) payloadLen = (payloadLen << 8) | ext[i];
     }
 
+    // Close frame → signal disconnect
+    if (opcode == 0x8) {
+        return false;
+    }
+
+    // Ping / Pong → read and discard payload
+    if (opcode == 0x9 || opcode == 0xA) {
+        uint8_t dummy;
+        for (uint64_t i = 0; i < payloadLen; i++) {
+            while (!respTcp.available()) { vTaskDelay(pdMS_TO_TICKS(1)); }
+            respTcp.read(&dummy, 1);
+        }
+        return true;
+    }
+
+    // Only accept binary (0x2) or continuation (0x0) frames as audio data
+    if (opcode != 0x2 && opcode != 0x0) {
+        uint8_t dummy;
+        for (uint64_t i = 0; i < payloadLen; i++) {
+            while (!respTcp.available()) { vTaskDelay(pdMS_TO_TICKS(1)); }
+            respTcp.read(&dummy, 1);
+        }
+        return true;
+    }
+
     if (payloadLen == 0) {
-        *outData = NULL;
-        *outLen = 0;
         return true;
     }
 
@@ -168,12 +206,16 @@ static bool wsReadFrame(uint8_t **outData, size_t *outLen)
 
     size_t read = 0;
     while (read < payloadLen) {
+        if (!respTcp.available()) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
         int r = respTcp.read(data + read, payloadLen - read);
-        if (r <= 0) {
+        if (r < 0) {
             free(data);
             return false;
         }
-        read += r;
+        if (r > 0) read += r;
     }
 
     *outData = data;
@@ -216,8 +258,9 @@ static void wsReceiveTask(void *parameter)
                     free(data);
                 }
             }
+            // len==0 → no frame yet or control frame handled, just continue
         } else {
-            Serial.println("[WS/resp] Frame read error — disconnecting");
+            Serial.println("[WS/resp] Connection closed by server");
             respTcp.stop();
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
