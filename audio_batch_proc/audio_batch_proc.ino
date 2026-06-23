@@ -26,6 +26,8 @@
 
 #include "audio_mic.h"
 #include "websocket.h"
+#include "audio_spk.h"
+#include "websocket_response.h"
 
 // ================================================================
 //  User‑configurable settings
@@ -43,6 +45,7 @@
 #define WS_SERVER_PORT   8080
 #define WS_SERVER_PATH   "/audio"
 #define WS_FALLBACK_URL  "ws://149.130.179.83:8080/audio"
+#define WS_RESPONSE_URL  "ws://149.130.179.83:8080/response"
 
 // ---- Auth token (must match the server's AUTH_TOKEN env var) ----
 #define AUTH_TOKEN "1K6IYgFlAew3G0MvRQ4izTD78kX5tmxa"
@@ -116,10 +119,15 @@ void setup()
     delay(1000);   // Let the USB/UART peripheral settle
     Serial.println("\n=== ESP32 Audio Batch Processor ===");
 
-    // ---------- Create PCM queue (before any task starts) ----------
+    // ---------- Create PCM queues (before any task starts) ----------
     pcmQueue = xQueueCreate(PCM_QUEUE_LENGTH, sizeof(pcm_block_t));
     if (pcmQueue == NULL) {
-        Serial.println("[FATAL] Queue creation failed — halting");
+        Serial.println("[FATAL] pcmQueue creation failed — halting");
+        while (1) { delay(1000); }
+    }
+    playQueue = xQueueCreate(PLAY_QUEUE_LENGTH, sizeof(pcm_block_t));
+    if (playQueue == NULL) {
+        Serial.println("[FATAL] playQueue creation failed — halting");
         while (1) { delay(1000); }
     }
 
@@ -221,8 +229,20 @@ void loop()
                     1                   // Core 1 — leave Core 0 free
                 );
 
+                // Start response WebSocket and audio playback task
+                wsResponseInit(WS_RESPONSE_URL, AUTH_TOKEN);
+                xTaskCreatePinnedToCore(
+                    audioPlayTask,
+                    "audioPlay",
+                    8192,
+                    NULL,
+                    2,
+                    NULL,
+                    0   // Core 0
+                );
+
                 state = STATE_STREAMING;
-                Serial.println("[State] Streaming audio → server");
+                Serial.println("[State] Streaming audio → server, response ready");
             } else {
                 // Handshake timed out — tear down and retry
                 Serial.println("[State] WS handshake timeout — retrying");
@@ -254,8 +274,9 @@ void loop()
         case STATE_DISCONNECTED: {
             Serial.println("[State] Tearing down subsystems …");
 
-            // 1. Stop audio capture & uninstall I2S driver
+            // 1. Stop audio capture & playback, uninstall I2S driver
             micDeinit();
+            wsResponseDeinit();
 
             // 2. Delete WebSocket sender and stop client
             wsDeinit();
